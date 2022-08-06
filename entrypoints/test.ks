@@ -6,13 +6,6 @@ function main {
     logger:info("Test entrypoint here, hi!").
     logger:info("Waiting for messages.").
 
-    clearGuis().
-    local g is gui(200).
-    local tabs is TabWidget:create(g).
-    local t is tabs:tab("test-payload").
-    t:addLabel("payload testing").
-    g:show().
-
     wait until not core:messages:empty.
 
     set received to core:messages:pop.

@@ -1,4 +1,5 @@
 @lazyGlobal off.
+requireOnce("lib/unittest").
 
 if not (defined DataListingWidget) {
     global DataListingWidget is lexicon(
@@ -6,25 +7,39 @@ if not (defined DataListingWidget) {
     ).
 }
 
-local SKIN_LABEL is "DataListingWidget/Label".
+local SKIN_LABEL_KEY is "DataListingWidget/LabelKey".
+local SKIN_LABEL_VALUE is "DataListingWidget/LabelValue".
 
 local function createDataListingWidget {
     parameter box.
+    parameter updateInterval is 0.5.
+    local lastUpdate is timestamp(0).
 
-    if not box:gui:skin:has(SKIN_LABEL) {
-        local style is box:gui:skin:add(SKIN_LABEL, box:gui:skin:label).
+    if not box:gui:skin:has(SKIN_LABEL_KEY) {
+        local style is box:gui:skin:add(SKIN_LABEL_KEY, box:gui:skin:label).
         set style:margin:v to 0.
         set style:padding:v to 0.
-        set style:font to "Source Code Pro".
+    }
+    if not box:gui:skin:has(SKIN_LABEL_VALUE) {
+        local style is box:gui:skin:add(SKIN_LABEL_VALUE, box:gui:skin:label).
+        set style:margin:v to 0.
+        set style:padding:v to 0.
+        //set style:hStretch to true.
+        set style:align to "right".
     }
 
     local self is lexicon(
         "__box", box,
         "__vbox", box:addVBox(),
-        "__entries", list(),  // list of (name, value) tuples
-        "__labels", list()  // Labels
+        "__entries", list()  // List of {key, value, keyLabel, valueLabel} lexicons. Value may be a primitive, or a delegate with zero arguments.
     ).
     self:add("set", set@:bind(self)).
+
+    when time - updateInterval > lastUpdate then {
+        set lastUpdate to time.
+        update(self).
+        preserve.
+    }
 
     return self.
 }
@@ -35,28 +50,66 @@ local function set {
     parameter value.
 
     for entry in self:__entries {
-        if entry[0] = key {
-            if not entry[1] = value {
-                set entry[1] to value.
-                update(self).
+        if entry:key = key {
+            if entry:value <> value {
+                set entry:value to value.
+                if not value:isType("delegate") {
+                    set entry:valueLabel:text to value.
+                }
             }
             return.
         }
     }
-    self:__entries:add(list("<b>" + key + "</b>", value:toString)).
+    local hbox is self:__vbox:addHLayout().
 
-    local label is self:__vbox:addLabel().
-    set label:style to self:__box:gui:skin:get(SKIN_LABEL).
-    self:__labels:add(label).
+    local keyLabel is hbox:addLabel("<b>" + key + "</b>").
+    set keyLabel:style to self:__box:gui:skin:get(SKIN_LABEL_KEY).
 
-    update(self).
+    local valueLabel is hbox:addLabel().
+    if value:isType("delegate") {
+        set valueLabel:text to value().
+    } else {
+        set valueLabel:text to value.
+    }
+    set valueLabel:style to self:__box:gui:skin:get(SKIN_LABEL_VALUE).
+
+    self:__entries:add(lexicon(
+        "key", key,
+        "value", value,
+        "keyLabel", keyLabel,
+        "valueLabel", valueLabel
+    )).
 }
 
 local function update {
+    // Update labels whose values were provided as delegates.
+    // Labels with static values are only updated in :set().
     parameter self.  // DataListingWidget
 
-    local tabulated is tabulate(self:__entries).
-    from { local row is 0. } until row = self:__entries:length step { set row to row + 1. } do {
-        set self:__labels[row]:text to tabulated[row].
+    for entry in self:__entries {
+        if entry:value:isType("delegate") {
+            set entry:valueLabel:text to entry:value().
+        }
     }
 }
+
+TestCase("DataListingWidget", {
+    parameter t.
+
+    local g is gui(200).
+    local w is DataListingWidget:create(g).
+
+    w:set("key1", "value1").
+    t:assertEquals(w:__entries[0]:key, "key1").
+    t:assertEquals(w:__entries[0]:value, "value1").
+    t:assertEquals(w:__entries[0]:keyLabel:text, "<b>key1</b>").
+    t:assertEquals(w:__entries[0]:valueLabel:text, "value1").
+
+    w:set("key1", "value2").
+    t:assertEquals(w:__entries[0]:key, "key1").
+    t:assertEquals(w:__entries[0]:value, "value2").
+    t:assertEquals(w:__entries[0]:keyLabel:text, "<b>key1</b>").
+    t:assertEquals(w:__entries[0]:valueLabel:text, "value2").
+
+    g:dispose().
+}).

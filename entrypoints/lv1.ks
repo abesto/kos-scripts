@@ -1,3 +1,6 @@
+@lazyGlobal off.
+
+requireOnce("lib/fmt").
 requireOnce("gui/TabWidget").
 requireOnce("gui/DataListingWidget").
 
@@ -8,114 +11,177 @@ local logger is logging:getLogger("lv1").
 local function unwarp {
     // TODO move to a library
     if warp > 0 {
-        info("Stopping warp...").
+        logger:info("Stopping warp...").
         set warp to 0.
-        wait until warp = 0.
-        wait 2.
     }
 }
 
-local function skipFrame {
-    wait 0.
-    return.
-    // TODO if this implementation works, then inline it
-    local now to time.
-    wait until time > now.
+local function doWarp {
+    if warp < 3 {
+        logger:info("Warping").
+        set warp to 3.
+    }
 }
 
 local function ascent {
-    // TODO redesign this to be (altitude, surface-velocity-pitch) targets
-    // Tuples of (speed, pitch): at `speed`, pitch to `pitch`
-    local curve is queue(
-        list(100, 80),
-        list(200, 70),
-        list(300, 60),
-        list(400, 50),
-        list(500, 40),
-        list(600, 30),
-        list(700, 20),
-        list(800, 10)
-    ).
+    parameter readout.  // DataListingWidget
+    parameter onFinished.
+
+    function status {
+        parameter msg.
+        readout:set("Status", msg).
+        logger:info(msg).
+    }
 
     when maxthrust = 0 then {
         logger:info("!!OUT OF dV!!").
     }.
 
-    // TODO maintain twr=1.3
-    lock throttle to 1.0.
-    when ship:verticalspeed > 0 then {
-        logger:info("Liftoff").
-    }
-    when ship:altitude > 40000 then {
-        logger:info("40km altitude, enabling RCS").
-        rcs on.
-    }
-
-    // TODO limit AoA
-    local mysteer is heading(90,90).
-    lock steering to mysteer.
-
-    until ship:apoapsis > 100000 or curve:empty() {
-        if curve:peek()[0] < ship:velocity:surface:mag {
-            local pitch to curve:pop()[1].
-            set mysteer to heading(90, pitch).
-            logger:info("Pitching to " + pitch).
-        }
-    }.
-
-    logger:info("Pitching done, now burning prograde").
-    unwarp().
-    unlock steering.
-    sas on.
-    skipFrame().
-    set sasmode to "prograde".
-    wait until ship:apoapsis > 100000.
-    lock throttle to 0.0.
-
-    logger:info("Coasting to edge of atmosphere").
-    wait until ship:altitude > 70000.
-
-    // Tell other CPUs on the vessel that ascent is done. They should wait a few seconds, then initiate circularization.
-    list processors in all_processors.
-    for processor in all_processors {
-        processor:connection:sendMessage("ascent_done").
-    }
-    skipFrame().
+    lock grav to body:mu / (ship:altitude + body:radius)^2.
+    lock throttle to 1.5 * Ship:Mass * grav / Ship:AvailableThrust.
+    lock steering to heading(90,90).
     stage.
 
+    when ship:verticalspeed > 0 then {
+        status("Liftoff").
+    }
+
+    wait until ship:verticalspeed > 30.
+    doWarp().
+    wait until ship:velocity:surface:mag > 100.
     unwarp().
+
+    lock steering to heading(90, 85).
+    status("Pitching to 85").
+    wait until ship:angularvel:mag < 0.1.
+
+    doWarp().
+    wait until 90 - vang(ship:srfprograde:vector, up:vector) <= 85.
+    unwarp().
+
+    lock steering to heading(90, 90 - vang(ship:srfprograde:vector, up:vector)).
+    status("Gravity turn").
+
+    when ship:velocity:orbit:mag > 800 then {
+        logger:info("Switched from surface to orbital prograde").
+        unwarp().
+        lock steering to heading(90, 90 - vang(ship:prograde:vector, up:vector)).
+        doWarp().
+    }
+
+    when ship:altitude > 40000 then {
+        logger:info("40km altitude, enabling RCS, max throttle").
+        unwarp().
+        rcs on.
+        wait 0.
+        lock throttle to 1.0.
+        wait 0.
+        doWarp().
+    }
+
+    doWarp().
+    wait until ship:orbit:apoapsis > 100000.
+    unwarp().
+
+    lock throttle to 0.0.
+    unlock throttle.
+    status("Coasting to edge of atmosphere").
+
+    doWarp().
+    wait until ship:altitude > 70000.
+    unwarp().
+
+    // Tell other CPUs on the vessel that ascent is done. They should wait a few seconds, then initiate circularization.
+    local allProcessors is list().
+    list processors in allProcessors.
+    list processors in allProcessors.
+    for processor in allProcessors {
+        processor:connection:sendMessage("ascent_done").
+    }
+    wait 0.
+    stage.
+
     logger:info("LV-1 ascent complete, payload detached, distancing from payload.").
+    readout:set("Status", "Payload separation").
+    wait 3.
     set ship:control:fore to -1.0.
     wait 5.
     set ship:control:fore to 0.0.
+    set ship:control:neutralize to true.
+    wait 0.
 
-    logger:info("Turning retrograde.").
-    sas on.
-    skipFrame().
-    set sasmode to "retrograde".
-    wait until ship:angularmomentum:mag < 0.1.
+    status("Turning retrograde").
+    lock steering to retrograde.
+    wait until ship:angularvel:mag < 1.
 
-    logger:info("Burning.").
-    lock throttle to 1.0.
-    wait until ship:altitude < 60000.
+    status("Guidance finished").
+    onFinished().
+}
+
+function twr {
+    local thrust is 0.
+    local engines is list().
+    list engines in engines.
+    for engine in engines {
+        set thrust to thrust + engine:thrust.
+    }
+    local g is body:mu / (ship:altitude + body:radius)^2.
+    return round((thrust / (ship:mass * g)) * 100) / 100.
 }
 
 function main {
     print("LV-1 launch script loaded. Stage to launch.").
+    local finished is false.
+    local started is false.
 
     clearGuis().
-    local g is gui(400).
+    set terminal:width to 120.
+    set terminal:height to 40.
+
+    local g is gui(300).
+    set g:x to 0.
+
     local tabs is TabWidget:create(g).
     local t is tabs:tab("LV-1").
-    tabs:tab("Test"):addLabel("TEST TEST TEST").
-    t:addLabel("LV-1 testing").
-    local readout is DataListingWidget:create(t).
-    readout:set("Status", "Waiting for launch").
-    readout:set("Vessel name", ship:name).
-    readout:set("Altitude", ship:altitude).
-    g:show().
 
-    local initialStage to stage:number.
-    //wait until stage:number < initialStage.
-    //ascent().
+    local readout is DataListingWidget:create(t).
+    readout:set("Vessel Name", ship:name).
+    readout:set("Status", "Waiting for launch").
+    readout:set("Altitude", { return fmt:altitude(ship:altitude). }).
+    readout:set("Apoapsis", { return fmt:altitude(ship:orbit:apoapsis). }).
+    readout:set("Prograde pitch", { return round(90 - vang(ship:srfprograde:vector, up:vector)):toString. }).
+    readout:set("TWR", { return twr():toString. }).
+    readout:set("Time", { return time:full. }).
+    readout:set("Warp", { return warp:toString. }).
+
+    local launchButton is t:addButton("Launch!").
+    local rebootButton is t:addButton("Reboot").
+    local exitButton is t:addButton("Exit").
+
+    set launchButton:onClick to {
+        launchButton:dispose().
+        rebootButton:dispose().
+
+        local revertButton is t:addButton("Revert to Launch").
+        set revertButton:onClick to {
+            kuniverse:revertToLaunch().
+        }.
+
+        set started to true.
+    }.
+
+    set rebootButton:onClick to {
+        reboot.
+    }.
+
+    set exitButton:onClick to {
+        set finished to true.
+    }.
+
+    g:show().
+    wait until started or finished.
+    if not finished {
+        ascent(readout, { set finished to true. }).
+    }
+    wait until finished.
 }

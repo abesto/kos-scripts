@@ -1,7 +1,15 @@
 @lazyGlobal off.
 requireOnce("lib/unittest").
 
-function fmt {
+if not (defined fmt) {
+    global fmt is lexicon(
+        "format", format@,
+        "tabulate", tabulate@,
+        "altitude", formatAltitude@
+    ).
+}
+
+local function format {
     parameter s.
     parameter args.
 
@@ -16,7 +24,7 @@ function fmt {
     return s.
 }
 
-function tabulate {
+local function tabulate {
     parameter input.  // list of lists of strings
     local output is list().  // Returns a list of strings, one per row, with columns tabulated.
 
@@ -45,18 +53,35 @@ function tabulate {
     return output.
 }
 
-TestCase("fmt", {
+local function formatAltitude {
+    parameter input.
+
+    if input < 5000 {
+        return round(input) + "m".
+    } else {
+        return round(input / 100) / 10 + "km".
+    }
+}
+
+TestCase("format", {
     parameter t.
-    t:assertEquals(fmt("foo {} {}", list("bar", "baz")), "foo bar baz").
+    t:assertEquals(fmt:format("foo {} {}", list("bar", "baz")), "foo bar baz").
 }).
 
 TestCase("tabulate", {
     parameter t.
     t:assertEquals(
-        tabulate(list(list("longfoo", "bar"), list("baz", "qux"))):join("\n"),
+        fmt:tabulate(list(list("longfoo", "bar"), list("baz", "qux"))):join("\n"),
         list(
             "longfoo bar",
             "baz     qux"
         ):join("\n")
     ).
+}).
+
+TestCase("altitude", {
+    parameter t.
+    t:assertEquals(fmt:altitude(3000.1111), "3000m").
+    t:assertEquals(fmt:altitude(200), "200m").
+    t:assertEquals(fmt:altitude(7100), "7.1km").
 }).
