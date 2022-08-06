@@ -1,5 +1,5 @@
 @lazyGlobal off.
-requireOnce("lib/unittest").
+requireOnce("lib/test").
 
 if not (defined fmt) {
     global fmt is lexicon(
@@ -63,12 +63,12 @@ local function formatAltitude {
     }
 }
 
-TestCase("format", {
+test("format", {
     parameter t.
     t:assertEquals(fmt:format("foo {} {}", list("bar", "baz")), "foo bar baz").
 }).
 
-TestCase("tabulate", {
+test("tabulate", {
     parameter t.
     t:assertEquals(
         fmt:tabulate(list(list("longfoo", "bar"), list("baz", "qux"))):join("\n"),
@@ -79,7 +79,7 @@ TestCase("tabulate", {
     ).
 }).
 
-TestCase("altitude", {
+test("altitude", {
     parameter t.
     t:assertEquals(fmt:altitude(3000.1111), "3000m").
     t:assertEquals(fmt:altitude(200), "200m").

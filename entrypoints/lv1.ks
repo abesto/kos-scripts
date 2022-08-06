@@ -141,10 +141,10 @@ function main {
     local g is gui(300).
     set g:x to 0.
 
-    local tabs is TabWidget:create(g).
+    local tabs is TabWidget(g).
     local t is tabs:tab("LV-1").
 
-    local readout is DataListingWidget:create(t).
+    local readout is DataListingWidget(t).
     readout:set("Vessel Name", ship:name).
     readout:set("Status", "Waiting for launch").
     readout:set("Altitude", { return fmt:altitude(ship:altitude). }).

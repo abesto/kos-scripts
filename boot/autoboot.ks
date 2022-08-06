@@ -19,9 +19,9 @@ if core:tag:length = 0 {
         copyPath("0:/entrypoints/" + core:tag, "").
         copyPath("0:/boot/autoboot.ks", "").
 
-        requireOnce("lib/unittest").
+        requireOnce("lib/test").
         runPath(core:tag).
-        if not testReport() {
+        if not printTestReport() {
             logger:fatal("Test suite failed; exiting").
         } else {
             logger:debug("Test suite passed").
