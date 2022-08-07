@@ -5,7 +5,8 @@ if not (defined fmt) {
     global fmt is lexicon(
         "format", format@,
         "tabulate", tabulate@,
-        "altitude", formatAltitude@
+        "altitude", formatAltitude@,
+        "hex", hex@
     ).
 }
 
@@ -17,6 +18,9 @@ local function format {
         local index is s:find("{}").
         if index = -1 {
             die("Too many arguments passed to fmt").
+        }
+        if not arg:istype("string") {
+            set arg to arg:toString.
         }
         set s to s:remove(index, 2):insert(index, arg).
     }
@@ -63,12 +67,24 @@ local function formatAltitude {
     }
 }
 
-test("format", {
+local hexDigits is "0123456789abcdef".
+local function hex {
+    parameter n.
+    local s is "".
+    until n = 0 {
+        local b is lowBits(n, 4).
+        set s to hexDigits[b] + s.
+        set n to bitShiftRight(n, 4).
+    }
+    return s.
+}
+
+test("fmt:format", {
     parameter t.
     t:assertEquals(fmt:format("foo {} {}", list("bar", "baz")), "foo bar baz").
 }).
 
-test("tabulate", {
+test("fmt:tabulate", {
     parameter t.
     t:assertEquals(
         fmt:tabulate(list(list("longfoo", "bar"), list("baz", "qux"))):join("\n"),
@@ -79,9 +95,14 @@ test("tabulate", {
     ).
 }).
 
-test("altitude", {
+test("fmt:altitude", {
     parameter t.
     t:assertEquals(fmt:altitude(3000.1111), "3000m").
     t:assertEquals(fmt:altitude(200), "200m").
     t:assertEquals(fmt:altitude(7100), "7.1km").
+}).
+
+test("fmt:hex", {
+    parameter t.
+    t:assertEquals(fmt:hex(2049), "801").
 }).

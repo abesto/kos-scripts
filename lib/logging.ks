@@ -1,4 +1,5 @@
 @lazyGlobal off.
+requireOnce("lib/fmt").
 
 if not (defined logging) {
     global logging is lexicon(
@@ -49,11 +50,13 @@ local function doLog {
     parameter level.
     parameter loggerName.
     parameter message.
+    parameter args is list().
 
     if level < logging:level {
         return.
     }
 
+    set message to fmt:format(message, args).
     local timePart is "[" + timeSpan(missionTime):full:padRight(14) + "] ".
     local levelPart is levelName(level):padRight(8).
     local loggerPart is "(" + loggerName + ") ".

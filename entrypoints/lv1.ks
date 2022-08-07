@@ -4,6 +4,8 @@ requireOnce("lib/fmt").
 requireOnce("gui/TabWidget").
 requireOnce("gui/DataListingWidget").
 
+requireOnce("lib/comm").
+
 local logger is logging:getLogger("lv1").
 
 // Launch script for LV-1 launch vehicle. It gets the payload to a suborbital trajectory with apoapsis ~100km, then returns to Kerbin.
@@ -112,7 +114,7 @@ local function ascent {
 
     status("Turning retrograde").
     lock steering to retrograde.
-    wait until ship:angularvel:mag < 1.
+    wait until ship:angularVel:mag < 0.1.
 
     status("Guidance finished").
     onFinished().
@@ -135,8 +137,6 @@ function main {
     local started is false.
 
     clearGuis().
-    set terminal:width to 120.
-    set terminal:height to 40.
 
     local g is gui(300).
     set g:x to 0.

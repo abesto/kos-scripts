@@ -1,7 +1,7 @@
 @lazyGlobal off.
 
 requireOnce("lib/logging").
-local logger is logging:getLogger("TabWidget").
+local logger is logging:getLogger("gui/TabWidget").
 
 local SKIN_TAB is "TabWidget/Tab".
 local SKIN_PANEL is "TabWidget/Panel".
