@@ -6,20 +6,41 @@ requireOnce("lib/test").
 local logger is logging:getLogger("lib/comm").
 local commVersion is "1".
 
-local anyRunning is false.
+if not (defined __comm_servers) {
+    global __comm_servers is lexicon().
+}
+
+function getCommUID {
+    parameter thing.
+    if thing:isType("kOSProcessor") {
+        return thing:part:uid.
+    } else if thing:isType("Vessel") {
+        return thing:rootpart:uid.
+    } else if thing:isType("Part") {
+        return thing:uid.
+    } else {
+        logger:fatal("commUID: Unknown type: " + thing:typename).
+    }
+}
 
 function CommServer {
-    parameter messageQueue.
-
+    parameter thing.  // kOSProcessor or Vessel
+    local commUID is getCommUID(thing).
+    if __comm_servers:hasKey(commUID) {
+        return __comm_servers[commUID].
+    }
     local self is lexicon().
+    __comm_servers:add(commUID, self).
+
+    local logger is logging:getLogger("lib/comm/server/" + commUID).
+
     local handlers is lexicon().  // name -> [{uuid, once: bool, fn: function(message)}]
-    local running is false.
 
     function handleMessage {
-        parameter message.  // {version, name, params}
+        parameter message.  // {version, name, data}
 
         local content is message:content.
-        logger:debug("handleMessage: `{}` params: `{}`", list(content:name, content:params)).
+        logger:debug("handleMessage: `{}` data: `{}`", list(content:name, content:data)).
 
         if content:version <> commVersion {
             logger:error("version mismatch: expected `{}` found `{}`",  list(commVersion, content:version)).
@@ -35,7 +56,7 @@ function CommServer {
         logger:debug("handlers: `{}`", list(handlers[content:name])).
         for handler in handlers[content:name] {
             logger:debug("Executing handler `{}`", list(handler:uuid)).
-            handler:fn(content:params).
+            handler:fn(message).
             if handler:once {
                 toRemove:add(handler:uuid).
             }
@@ -62,6 +83,13 @@ function CommServer {
     }
     self:add("on", addHandler@:bind(false)).
     self:add("once", addHandler@:bind(true)).
+    self:add("only", {
+        parameter name, fn.
+        if handlers:hasKey(name) {
+            logger:fatal("Handler already exists for `{}`", list(name)).
+        }
+        addHandler(false, name, fn).
+    }).
 
     function removeHandler {
         parameter name, uuid is false.
@@ -87,22 +115,12 @@ function CommServer {
         logger:warning("removeHandler: No handler for message `{}` with uuid `{}`", list(name, uuid)).
     }
     self:add("off", removeHandler@).
+    self:add("clearHandlers", { handlers:clear(). }).
 
-    function withRunning {
-        parameter fn.
-        if anyRunning {
-            die("Tried to start a CommServer while another one is already running.").
+    when not thing:messages:empty then {
+        until thing:messages:empty {
+            handleMessage(thing:messages:pop()).
         }
-        set running to true.
-        set anyRunning to true.
-        fn().
-        set running to false.
-        set anyRunning to false.
-    }
-    self:add("withRunning", withRunning@).
-
-    when running and not messageQueue:empty then {
-        handleMessage(messageQueue:pop()).
         preserve.
     }
 
@@ -110,14 +128,16 @@ function CommServer {
 }
 
 function CommClient {
-    parameter connection.
+    parameter thing.
+    local logger is logging:getLogger("lib/comm/client/" + getCommUID(thing)).
+    local connection is thing:connection.
 
     local self is lexicon().
 
     function send {
-        parameter name, params is lexicon().
-        local message is lexicon("version", commVersion, "name", name, "params", params).
-        logger:debug("Sending to `{}`: `{}` params `{}`", list(connection:destination:name, name, params)).
+        parameter name, data is lexicon().
+        local message is lexicon("version", commVersion, "name", name, "data", data).
+        logger:debug("Sending to `{}`: `{}` data `{}`", list(connection:destination:name, name, data)).
         local success is connection:sendMessage(message).
         if not success {
             logger:error("Failed to send to " + connection:destination + ": " + message).
@@ -130,10 +150,10 @@ function CommClient {
 }
 
 local function test_sendWait {
-    parameter server, client, name, params is false.
+    parameter server, client, name, data is false.
     local done is false.
     server:once(name, {parameter _. set done to true. }).
-    local success is client:send(name, params).
+    local success is client:send(name, data).
     if success {
         wait until done.
     }
@@ -144,66 +164,63 @@ test("comm/simple", {
     parameter t.
     //set logging:level to logging:LEVEL_DEBUG.
 
-    local server is CommServer(core:messages).
-    local client is CommClient(core:connection).
+    local server is CommServer(core).
+    local client is CommClient(core).
     local sendWait is test_sendWait@:bind(server, client).
     local received is 0.
 
-    server:withRunning({
-        server:once("testMsg", { parameter n. set received to n. }).
-        sendWait("testMsg", 1).
-        t:assertEquals(received, 1, "once executed").
+    server:clearHandlers().
+    server:once("testMsg", { parameter msg. set received to msg:content:data. }).
+    sendWait("testMsg", 1).
+    t:assertEquals(received, 1, "once executed").
 
-        sendWait("testMsg", 2).
-        t:assertEquals(received, 1, "once removed after execution").
+    sendWait("testMsg", 2).
+    t:assertEquals(received, 1, "once removed after execution").
 
-        server:on("testMsg", { parameter n. set received to n. }).
-        sendWait("testMsg", 3).
-        t:assertEquals(received, 3, "on executed").
+    server:on("testMsg", { parameter msg. set received to msg:content:data. }).
+    sendWait("testMsg", 3).
+    t:assertEquals(received, 3, "on executed").
 
-        sendWait("testMsg", 4).
-        t:assertEquals(received, 4, "on executed again").
-    }).
+    sendWait("testMsg", 4).
+    t:assertEquals(received, 4, "on executed again").
 }).
 
 test("comm/off()", {
     parameter t.
 
-    local server is CommServer(core:messages).
-    local client is CommClient(core:connection).
+    local server is CommServer(core).
+    local client is CommClient(core).
     local sendWait is test_sendWait@:bind(server, client).
 
-    server:withRunning({
-        local count is 0.
+    local count is 0.
 
-        server:on("testMsg", { parameter params. set count to count + 1. }).
-        server:on("testMsg", { parameter params. set count to count + 1. }).
-        sendWait("testMsg", "comm/off()/0").
-        t:assertEquals(count, 2).
+    server:clearHandlers().
+    server:on("testMsg", { parameter data. set count to count + 1. }).
+    server:on("testMsg", { parameter data. set count to count + 1. }).
+    sendWait("testMsg", "comm/off()/0").
+    t:assertEquals(count, 2).
 
-        server:off("testMsg").
-        sendWait("testMsg", "comm/off()/1").
-        t:assertEquals(count, 2).
-    }).
+    server:off("testMsg").
+    sendWait("testMsg", "comm/off()/1").
+    t:assertEquals(count, 2).
 }).
 
 test("comm/off(uuid)", {
     parameter t.
 
-    local server is CommServer(core:messages).
-    local client is CommClient(core:connection).
+    local server is CommServer(core).
+    local client is CommClient(core).
     local sendWait is test_sendWait@:bind(server, client).
 
-    server:withRunning({
-        local count is 0.
+    local count is 0.
 
-        local uuid is server:on("testMsg", { parameter params. set count to count + 1. }).
-        server:on("testMsg", { parameter params. set count to count + 1. }).
-        sendWait("testMsg").
-        t:assertEquals(count, 2).
+    server:clearHandlers().
+    local uuid is server:on("testMsg", { parameter data. set count to count + 1. }).
+    server:on("testMsg", { parameter data. set count to count + 1. }).
+    sendWait("testMsg").
+    t:assertEquals(count, 2).
 
-        server:off("testMsg", uuid).
-        sendWait("testMsg").
-        t:assertEquals(count, 3).
-    }).
+    server:off("testMsg", uuid).
+    sendWait("testMsg").
+    t:assertEquals(count, 3).
 }).

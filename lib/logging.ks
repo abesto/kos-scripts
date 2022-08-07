@@ -61,11 +61,8 @@ local function doLog {
     local levelPart is levelName(level):padRight(8).
     local loggerPart is "(" + loggerName + ") ".
     print(timePart + levelPart + loggerPart + message).
-}
 
-function die {
-    parameter message.
-
-    logging:fatal(message).
-    return 1/0.
+    if level = logging:LEVEL_FATAL {
+        return 1/0.
+    }
 }

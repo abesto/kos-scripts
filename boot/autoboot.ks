@@ -8,6 +8,7 @@ runOncePath("lib/require").
 require("lib/prelude").
 
 local logger is logging:getLogger("autoboot").
+set logging:level to logging:LEVEL_DEBUG.
 
 if core:tag:length = 0 {
     logger:fatal("kOS core has no tag set; exiting").
@@ -25,6 +26,7 @@ if core:tag:length = 0 {
             logger:fatal("Test suite failed; exiting").
         } else {
             logger:debug("Test suite passed").
+            clearScreen.
             main().
         }
     } else {

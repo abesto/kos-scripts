@@ -14,10 +14,15 @@ local function format {
     parameter s.
     parameter args.
 
+    if not args:isType("List") {
+        set args to List(args).
+    }
+
     for arg in args {
         local index is s:find("{}").
         if index = -1 {
-            die("Too many arguments passed to fmt").
+            print("Too many arguments passed to fmt").
+            return 1/0.
         }
         if not arg:istype("string") {
             set arg to arg:toString.

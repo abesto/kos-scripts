@@ -31,12 +31,7 @@ function TestSuite {
 
         local function assertEquals {
             parameter lhs, rhs, extra is "".
-
-            local equals is false.
-            if lhs = rhs {
-                set equals to true.
-            }
-            case:assert(equals,  lhs + " = " + rhs, extra).
+            case:assert(lhs = rhs,  lhs + " = " + rhs, extra).
         }
         case:add("assertEquals", assertEquals@).
 

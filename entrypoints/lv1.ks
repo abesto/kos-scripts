@@ -3,8 +3,7 @@
 requireOnce("lib/fmt").
 requireOnce("gui/TabWidget").
 requireOnce("gui/DataListingWidget").
-
-requireOnce("lib/comm").
+requireOnce("lib/rpc").
 
 local logger is logging:getLogger("lv1").
 
@@ -26,8 +25,7 @@ local function doWarp {
 }
 
 local function ascent {
-    parameter readout.  // DataListingWidget
-    parameter onFinished.
+    parameter readout, payloadClient, onFinished.
 
     function status {
         parameter msg.
@@ -35,14 +33,14 @@ local function ascent {
         logger:info(msg).
     }
 
-    when maxthrust = 0 then {
-        logger:info("!!OUT OF dV!!").
-    }.
 
     lock grav to body:mu / (ship:altitude + body:radius)^2.
-    lock throttle to 1.5 * Ship:Mass * grav / Ship:AvailableThrust.
     lock steering to heading(90,90).
     stage.
+    lock throttle to 1.5 * Ship:Mass * grav / Ship:AvailableThrust.
+    when maxthrust < 5 then {
+        logger:info("!!OUT OF dV!!").
+    }.
 
     when ship:verticalspeed > 0 then {
         status("Liftoff").
@@ -93,18 +91,12 @@ local function ascent {
     wait until ship:altitude > 70000.
     unwarp().
 
-    // Tell other CPUs on the vessel that ascent is done. They should wait a few seconds, then initiate circularization.
-    local allProcessors is list().
-    list processors in allProcessors.
-    list processors in allProcessors.
-    for processor in allProcessors {
-        processor:connection:sendMessage("ascent_done").
-    }
-    wait 0.
-    stage.
 
     logger:info("LV-1 ascent complete, payload detached, distancing from payload.").
     readout:set("Status", "Payload separation").
+    payloadClient:send("separation-start", 10).
+    stage.
+    readout:set("Payload", "Separated").
     wait 3.
     set ship:control:fore to -1.0.
     wait 5.
@@ -114,7 +106,8 @@ local function ascent {
 
     status("Turning retrograde").
     lock steering to retrograde.
-    wait until ship:angularVel:mag < 0.1.
+    wait 3.  // It'll take at least this long to turn, and it gives angular velocity to go up so that the next wait can be meaningful
+    wait until ship:angularMomentum:mag < 1.
 
     status("Guidance finished").
     onFinished().
@@ -132,9 +125,7 @@ function twr {
 }
 
 function main {
-    print("LV-1 launch script loaded. Stage to launch.").
     local finished is false.
-    local started is false.
 
     clearGuis().
 
@@ -154,10 +145,37 @@ function main {
     readout:set("Time", { return time:full. }).
     readout:set("Warp", { return warp:toString. }).
 
-    local launchButton is t:addButton("Launch!").
+    local payloadClient is false.
+    local rpcServer is RpcServer(core).
+    local payloadReady is false.
+    rpcServer:registerFunction("payload-hello", {
+        parameter payloadCoreUID.
+        for proc in ship:modulesNamed("kOSProcessor") {
+            if proc:part:uid = payloadCoreUID {
+                set payloadClient to RpcClient(proc).
+                set payloadReady to true.
+                return true.
+            }
+        }
+        logger:error("No payload processor found with UID " + payloadCoreUID).
+    }).
+    rpcServer:registerFunction("payload-status", readout:set@:bind("Payload")).
+    rpcServer:registerFunction("payload-ping", readout:set@:bind("Last payload ping")).
+
     local rebootButton is t:addButton("Reboot").
     local exitButton is t:addButton("Exit").
 
+    set rebootButton:onClick to {
+        reboot.
+    }.
+
+    set exitButton:onClick to {
+        set finished to true.
+    }.
+
+    wait until payloadReady.
+    local started is false.
+    local launchButton is t:addButton("Launch!").
     set launchButton:onClick to {
         launchButton:dispose().
         rebootButton:dispose().
@@ -170,18 +188,11 @@ function main {
         set started to true.
     }.
 
-    set rebootButton:onClick to {
-        reboot.
-    }.
-
-    set exitButton:onClick to {
-        set finished to true.
-    }.
-
     g:show().
+    logger:info("Boot sequence complete").
     wait until started or finished.
     if not finished {
-        ascent(readout, { set finished to true. }).
+        ascent(readout, payloadClient, { set finished to true. }).
     }
     wait until finished.
 }
